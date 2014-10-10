@@ -1,0 +1,122 @@
+--
+-- Name: plpgsql; Type: EXTENSION; Schema: -; Owner: 
+--
+
+CREATE EXTENSION IF NOT EXISTS plpgsql WITH SCHEMA pg_catalog;
+
+--
+-- Name: registerTweet(...)
+--
+
+CREATE FUNCTION registerTweet(in_tweet_id BIGINT, in_user_id BIGINT, in_text TEXT, in_favourite_count INTEGER, in_latitude DOUBLE PRECISION, in_longitude DOUBLE PRECISION, in_retweet_count INTEGER, in_created_at TIMESTAMP WITH TIME ZONE, in_captured_at TIMESTAMP WITH TIME ZONE, in_user_utc_offset INTEGER, in_user_location TEXT, in_user_created_at TIMESTAMP WITH TIME ZONE, in_user_followers_count INTEGER, in_user_statuses_count INTEGER, in_user_friends_count INTEGER, in_user_favourites_count INTEGER, in_user_lang_str TEXT) RETURNS VOID AS
+$$
+DECLARE
+	user_lang_id INTEGER;
+    user_stats_id_now BIGINT;
+    user_stats_id_first_seen BIGINT;
+    
+BEGIN
+    -- retrieve lang_id of current user
+    SELECT lang_id INTO user_lang_id FROM languages WHERE lang_str = in_user_lang_str;
+	IF NOT FOUND THEN
+        -- first time we see this language, register it
+		INSERT INTO languages(lang_str) VALUES (in_user_lang_str) 
+                RETURNING lang_id INTO user_lang_id;
+	END IF;
+
+    -- retrieve stats_now of current user
+    SELECT stats_now INTO user_stats_id_now FROM twitter_user WHERE user_id = in_user_id;
+	IF NOT FOUND THEN
+        -- first time we see this user
+        -- insert 2 records in table user_stats, one for stats_first_seen (initial stats) 
+        -- and one for stats_now (running stats updated at each tweet)
+        INSERT INTO user_stats(followers_count, statuses_count, friends_count, favourites_count) 
+                VALUES (in_user_followers_count, in_user_statuses_count, in_user_friends_count, in_user_favourites_count)
+                RETURNING user_stats_id INTO user_stats_id_first_seen;
+        INSERT INTO user_stats(followers_count, statuses_count, friends_count, favourites_count) 
+                VALUES (in_user_followers_count, in_user_statuses_count, in_user_friends_count, in_user_favourites_count)
+                RETURNING user_stats_id INTO user_stats_id_now;
+        -- insert the user
+		INSERT INTO twitter_user(user_id, utc_offset, location, created_at, first_seen_at, lang_id, stats_first_seen, stats_now) 
+                VALUES (in_user_id, in_user_utc_offset, in_user_location, in_user_created_at, now(), user_lang_id, user_stats_id_first_seen, user_stats_id_now);
+	ELSE 
+        -- update running stats of this user
+		UPDATE user_stats 
+                SET followers_count = in_user_followers_count, 
+                    statuses_count = in_user_statuses_count, 
+                    friends_count = in_user_friends_count, 
+                    favourites_count = in_user_favourites_count 
+                WHERE user_stats_id = user_stats_id_now;
+    END IF;
+
+    -- it seems twitter API may report twice the same tweet sometimes.
+    IF NOT EXISTS (SELECT 1 FROM tweet where tweet_id = in_tweet_id) THEN
+        INSERT INTO tweet(tweet_id, user_id, text, favourite_count, latitude, longitude, retweet_count, created_at, captured_at, saved_at, user_tweet_num) 
+            VALUES (in_tweet_id, in_user_id, in_text, in_favourite_count, in_latitude, in_longitude, in_retweet_count, in_created_at, in_captured_at, now(), in_user_statuses_count);
+    END IF;
+END
+$$ LANGUAGE plpgsql;
+
+
+--
+-- Name: languages; Type: TABLE; Schema: public; Owner: twitter; Tablespace: 
+--
+
+CREATE TABLE languages (
+    lang_id SERIAL PRIMARY KEY,
+    lang_str text UNIQUE
+);
+
+
+--
+-- Name: user_stats; Type: TABLE; Schema: public; Owner: twitter; Tablespace: 
+--
+
+CREATE TABLE user_stats (
+    user_stats_id BIGSERIAL PRIMARY KEY,
+    followers_count integer,
+    statuses_count integer,
+    friends_count integer,
+    favourites_count integer
+);
+
+
+--
+-- Name: twitter_user; Type: TABLE; Schema: public; Owner: twitter; Tablespace: 
+--
+
+CREATE TABLE twitter_user (
+    user_id bigint PRIMARY KEY,
+    utc_offset integer,
+    location text,
+    created_at timestamp with time zone,
+    first_seen_at timestamp with time zone,
+    lang_id integer REFERENCES languages(lang_id),
+    stats_first_seen bigint UNIQUE REFERENCES user_stats(user_stats_id),
+    stats_now bigint UNIQUE REFERENCES user_stats(user_stats_id)
+);
+
+
+--
+-- Name: tweet; Type: TABLE; Schema: public; Owner: twitter; Tablespace: 
+--
+
+CREATE TABLE tweet (
+    tweet_id bigint PRIMARY KEY,
+    user_id bigint REFERENCES twitter_user(user_id),
+    text text,
+    favourite_count integer,
+    latitude double precision,
+    longitude double precision,
+    retweet_count integer,
+    created_at timestamp with time zone,
+    captured_at timestamp with time zone,
+    saved_at timestamp with time zone,
+    user_tweet_num integer
+);
+
+
+--
+-- PostgreSQL database dump complete
+--
+
