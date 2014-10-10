@@ -5,10 +5,10 @@ from debug import debug_console
 from Queue import Queue
 from datetime import datetime
 
-API_key='D116y8wxNZgYALPvECwlF80aa'
-API_secret='GBCoqjVnpWZ9vucwsnWj4ssAZWS0g0QTOpAAmaCvwNTtLIVXN1'
-Access_token='143848975-LAMTQH3qcm7PtF2wXkHr1z3knTVLEem3pPJZQJCv'
-Access_token_secret='X4EHuGjXo7ARfyvlj6gtkhpNIyGTyIz0wN3I8EIKH5FWT' 
+API_key=WRITE_YOUR_API_KEY_HERE
+API_secret=WRITE_YOUR_API_SECRET_HERE
+Access_token=WRITE_YOUR_ACCESS_TOKEN_HERE
+Access_token_secret=WRITE_YOUR_ACESS_TOKEN_SECRET_HERE
 DB_NAME = 'twitterdb'
 DB_USER = 'twitter'
 LONGITUDE = 0
