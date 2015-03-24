@@ -5,6 +5,12 @@
 CREATE EXTENSION IF NOT EXISTS plpgsql WITH SCHEMA pg_catalog;
 
 --
+-- Name: postgis; Type: EXTENSION; Schema: -; Owner: 
+--
+
+CREATE EXTENSION IF NOT EXISTS postgis;
+
+--
 -- Name: registerTweet(...)
 --
 
@@ -51,8 +57,8 @@ BEGIN
 
     -- it seems twitter API may report twice the same tweet sometimes.
     IF NOT EXISTS (SELECT 1 FROM tweet where tweet_id = in_tweet_id) THEN
-        INSERT INTO tweet(tweet_id, user_id, text, favourite_count, latitude, longitude, retweet_count, created_at, captured_at, saved_at, user_tweet_num) 
-            VALUES (in_tweet_id, in_user_id, in_text, in_favourite_count, in_latitude, in_longitude, in_retweet_count, in_created_at, in_captured_at, now(), in_user_statuses_count);
+        INSERT INTO tweet(tweet_id, user_id, text, favourite_count, gps, retweet_count, created_at, captured_at, saved_at, user_tweet_num)   
+            VALUES (in_tweet_id, in_user_id, in_text, in_favourite_count, ST_SetSRID(ST_MakePoint(in_longitude, in_latitude),4326), in_retweet_count, in_created_at, in_captured_at, now(), in_user_statuses_count);
     END IF;
 END
 $$ LANGUAGE plpgsql;
@@ -114,6 +120,20 @@ CREATE TABLE tweet (
     saved_at timestamp with time zone,
     user_tweet_num integer
 );
+
+CREATE INDEX ON tweet (created_at);
+
+CREATE TABLE stats_per_period(
+    period_id serial primary key, 
+    last_period_id int references stats_per_period(period_id), 
+    end_of_period timestamp with time zone,
+    num_tweets_emitted bigint,
+    num_tweets_captured bigint
+);
+
+insert into stats_per_period(
+            last_period_id, end_of_period, num_tweets_emitted, num_tweets_captured)
+            values (null, current_timestamp, 0, 0);
 
 
 --
