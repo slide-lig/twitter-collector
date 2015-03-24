@@ -41,7 +41,7 @@ class Collector(tweepy.StreamListener):
             # connect to twitter API
             auth = tweepy.auth.OAuthHandler(API_key, API_secret)
             auth.set_access_token(Access_token, Access_token_secret)
-            stream = tweepy.Stream(auth, self, timeout=None)
+            stream = tweepy.Stream(auth, self, timeout=5)
             self.printer.log("Connected to twitter API.")
             
             # start collection
@@ -50,8 +50,8 @@ class Collector(tweepy.StreamListener):
             pass
         except Exception, e:
             self.printer.log(e)
-            debug_console(collector=self, LONGITUDE = LONGITUDE,
-                                  LATITUDE = LATITUDE)
+            #debug_console(collector=self, LONGITUDE = LONGITUDE,
+            #                      LATITUDE = LATITUDE)
         # stop db workers
         self.printer.log('Stop any remaining db worker...')
         for i in range(NUM_DB_WORKERS):
@@ -62,6 +62,14 @@ class Collector(tweepy.StreamListener):
     # possible.
     def on_data(self, raw_data):
         self.queue.put((datetime.now(), raw_data))
+
+    def on_error(self, status_code):
+        self.printer.log('An error has occured! Status code = %s' % status_code)
+        return True  # keep stream alive
+
+    def on_timeout(self):
+        self.printer.log('Snoozing Zzzzzz')
+
         
 
 class DBWorker(threading.Thread, tweepy.StreamListener):
@@ -148,15 +156,8 @@ class DBWorker(threading.Thread, tweepy.StreamListener):
         self.cursor.execute(query, kwargs)   
         self.conn.commit()
 
-    def on_error(self, status_code):
-        self.printer.log('An error has occured! Status code = %s' % status_code)
-        return True  # keep stream alive
-
-    def on_timeout(self):
-        self.printer.log('Snoozing Zzzzzz')
-
     def on_limit(self, track):
-        self.printer.log('Limitation notice: %s' % str(track))
+        self.printer.log('Limitation notice: skipped %s tweets' % str(track))
         return
 
     def on_disconnect(self, notice):
