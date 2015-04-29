@@ -57,8 +57,8 @@ BEGIN
 
     -- it seems twitter API may report twice the same tweet sometimes.
     IF NOT EXISTS (SELECT 1 FROM tweet where tweet_id = in_tweet_id) THEN
-        INSERT INTO tweet(tweet_id, user_id, text, favourite_count, gps, retweet_count, created_at, captured_at, saved_at, user_tweet_num)   
-            VALUES (in_tweet_id, in_user_id, in_text, in_favourite_count, ST_SetSRID(ST_MakePoint(in_longitude, in_latitude),4326), in_retweet_count, in_created_at, in_captured_at, now(), in_user_statuses_count);
+        INSERT INTO tweet(tweet_id, user_id, text, gps, created_at, captured_at, saved_at, user_tweet_num)   
+            VALUES (in_tweet_id, in_user_id, in_text, ST_SetSRID(ST_MakePoint(in_longitude, in_latitude),4326), in_created_at, in_captured_at, now(), in_user_statuses_count);
     END IF;
 END
 $$ LANGUAGE plpgsql;
@@ -111,17 +111,15 @@ CREATE TABLE tweet (
     tweet_id bigint PRIMARY KEY,
     user_id bigint REFERENCES twitter_user(user_id),
     text text,
-    favourite_count integer,
-    latitude double precision,
-    longitude double precision,
-    retweet_count integer,
     created_at timestamp with time zone,
     captured_at timestamp with time zone,
+    user_tweet_num integer,
     saved_at timestamp with time zone,
-    user_tweet_num integer
+    gps geometry(Point,4326)
 );
 
 CREATE INDEX ON tweet (created_at);
+CREATE INDEX tweet_gps_idx ON tweet USING gist (gps);
 
 CREATE TABLE stats_per_period(
     period_id serial primary key, 
