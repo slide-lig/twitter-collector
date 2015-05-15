@@ -1,9 +1,9 @@
 
 --
--- Name: registerTweet(...)
+-- Name: registerOneTweet(...)
 --
 
-CREATE FUNCTION registerTweet(in_tweet_id BIGINT, in_user_id BIGINT, in_text TEXT, in_favourite_count INTEGER, in_latitude DOUBLE PRECISION, in_longitude DOUBLE PRECISION, in_retweet_count INTEGER, in_created_at TIMESTAMP WITH TIME ZONE, in_captured_at TIMESTAMP WITH TIME ZONE, in_user_utc_offset INTEGER, in_user_location TEXT, in_user_created_at TIMESTAMP WITH TIME ZONE, in_user_followers_count INTEGER, in_user_statuses_count INTEGER, in_user_friends_count INTEGER, in_user_favourites_count INTEGER, in_user_lang_str TEXT) RETURNS VOID AS
+CREATE FUNCTION registerOneTweet(in_tweet_id BIGINT, in_user_id BIGINT, in_text TEXT, in_latitude DOUBLE PRECISION, in_longitude DOUBLE PRECISION, in_created_at TIMESTAMP WITH TIME ZONE, in_captured_at TIMESTAMP WITH TIME ZONE, in_user_utc_offset INTEGER, in_user_location TEXT, in_user_created_at TIMESTAMP WITH TIME ZONE, in_user_followers_count INTEGER, in_user_statuses_count INTEGER, in_user_friends_count INTEGER, in_user_favourites_count INTEGER, in_user_lang_str TEXT) RETURNS VOID AS
 $$
 DECLARE
 	user_lang_id INTEGER;

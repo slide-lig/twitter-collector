@@ -120,8 +120,6 @@ class DBWorker(threading.Thread, tweepy.StreamListener):
             user.created_at = user.created_at.replace(tzinfo = TZ_UTC)
             self.store_tweet_in_db(  tweet_id = tweet.id,
                                          text = tweet.text,
-                              favourite_count = tweet.favorite_count,
-                                retweet_count = tweet.retweet_count,
                                    created_at = tweet.created_at,
                                   captured_at = self.captured_at,
                                      latitude = coordinates[LATITUDE],
@@ -137,14 +135,12 @@ class DBWorker(threading.Thread, tweepy.StreamListener):
                                 user_lang_str = user.lang)
 
     def store_tweet_in_db(self, **kwargs):
-        query = 'SELECT registerTweet(' + \
+        query = 'SELECT registerOneTweet(' + \
                     '%(tweet_id)s, ' + \
                     '%(user_id)s, ' + \
                     '%(text)s, ' + \
-                    '%(favourite_count)s, ' + \
                     '%(latitude)s, ' + \
                     '%(longitude)s, ' + \
-                    '%(retweet_count)s, ' + \
                     '%(created_at)s, ' + \
                     '%(captured_at)s, ' + \
                     '%(user_utc_offset)s, ' + \
