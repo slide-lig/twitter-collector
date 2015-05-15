@@ -1,0 +1,12 @@
+{
+    "API_key": 			    "XXXXXX",
+    "API_secret": 	    	"XXXXXX",
+    "Access_token": 		"XXXXXX-XXXXXX",
+    "Access_token_secret": 	"XXXXXX",
+    "db_host":              "localhost",
+    "db_name":              "twitterdb",
+    "db_user":              "twitter_collector",
+    "db_password":          "XXXXXX",
+    "num_workers":          20
+}
+

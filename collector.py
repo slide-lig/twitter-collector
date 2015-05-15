@@ -1,20 +1,18 @@
 #!/usr/bin/env python
-import psycopg2, tweepy, threading, time
+import psycopg2, tweepy, threading, time, json
 from utc import TZ_UTC
 from debug import debug_console
 from Queue import Queue
 from datetime import datetime
 
-API_key=WRITE_YOUR_API_KEY_HERE
-API_secret=WRITE_YOUR_API_SECRET_HERE
-Access_token=WRITE_YOUR_ACCESS_TOKEN_HERE
-Access_token_secret=WRITE_YOUR_ACESS_TOKEN_SECRET_HERE
-DB_NAME = 'twitterdb'
-DB_USER = 'twitter'
 LONGITUDE = 0
 LATITUDE = 1
-NUM_DB_WORKERS = 20
 STOP_COMMAND = 0
+
+class Conf(object):
+    def __init__(self):
+        with open('conf.json') as f:
+            self.__dict__ = json.load(f)
 
 class SyncPrinter(object):
     def __init__(self):
@@ -24,7 +22,7 @@ class SyncPrinter(object):
             print("%s - %s" % (time.ctime(), str(message)))
 
 class Collector(tweepy.StreamListener):
-    def main(self):
+    def main(self, conf):
         # create synchronized printer        
         self.printer = SyncPrinter()
 
@@ -32,15 +30,15 @@ class Collector(tweepy.StreamListener):
         self.queue = Queue()
         
         # create db workers
-        self.db_workers = [ DBWorker(i, self.queue, self.printer) \
-                            for i in range(NUM_DB_WORKERS) ]
+        self.db_workers = [ DBWorker(i, self.queue, self.printer, conf) \
+                            for i in range(conf.num_workers) ]
         try:
             # start db workers
             [ w.start() for w in self.db_workers ]
             
             # connect to twitter API
-            auth = tweepy.auth.OAuthHandler(API_key, API_secret)
-            auth.set_access_token(Access_token, Access_token_secret)
+            auth = tweepy.auth.OAuthHandler(conf.API_key, conf.API_secret)
+            auth.set_access_token(conf.Access_token, conf.Access_token_secret)
             stream = tweepy.Stream(auth, self, timeout=5)
             self.printer.log("Connected to twitter API.")
             
@@ -54,7 +52,7 @@ class Collector(tweepy.StreamListener):
             #                      LATITUDE = LATITUDE)
         # stop db workers
         self.printer.log('Stop any remaining db worker...')
-        for i in range(NUM_DB_WORKERS):
+        for i in range(conf.num_workers):
             self.queue.put(STOP_COMMAND)
         self.printer.log('\nGoodbye!')
 
@@ -74,15 +72,20 @@ class Collector(tweepy.StreamListener):
 
 class DBWorker(threading.Thread, tweepy.StreamListener):
     
-    def __init__(self, thread_num, queue, printer):
+    def __init__(self, thread_num, queue, printer, conf):
         threading.Thread.__init__(self)
         tweepy.StreamListener.__init__(self)
         self.name = "DBWorker #%d" % thread_num
         self.queue = queue
         self.printer = printer
+        self.conf = conf
         
     def run(self):
-        self.conn = psycopg2.connect(dbname=DB_NAME, user=DB_USER)
+        self.conn = psycopg2.connect(
+                host=self.conf.db_host,
+                dbname=self.conf.db_name, 
+                user=self.conf.db_user,
+                password=self.conf.db_password)
         self.cursor = self.conn.cursor()
         try:
             self.printer.log("%s: Connected to database." % self.name)
@@ -171,6 +174,7 @@ class DBWorker(threading.Thread, tweepy.StreamListener):
 
 
 if __name__ == '__main__':
+    conf = Conf()
     collector = Collector()
-    collector.main()
+    collector.main(conf)
 
