@@ -124,6 +124,7 @@ class DBWorker(threading.Thread, tweepy.StreamListener):
                                   captured_at = self.captured_at,
                                      latitude = coordinates[LATITUDE],
                                     longitude = coordinates[LONGITUDE],
+                                         lang = tweet.lang,
                                       user_id = user.id,
                               user_utc_offset = user.utc_offset,
                                 user_location = user.location,
@@ -132,7 +133,8 @@ class DBWorker(threading.Thread, tweepy.StreamListener):
                           user_statuses_count = user.statuses_count,
                            user_friends_count = user.friends_count,
                         user_favourites_count = user.favourites_count,
-                                user_lang_str = user.lang)
+                                user_lang_str = user.lang,
+                                 collector_id = self.conf.collector_id)
 
     def store_tweet_in_db(self, **kwargs):
         query = 'SELECT registerOneTweet(' + \
@@ -143,6 +145,7 @@ class DBWorker(threading.Thread, tweepy.StreamListener):
                     '%(longitude)s, ' + \
                     '%(created_at)s, ' + \
                     '%(captured_at)s, ' + \
+                    '%(lang)s, ' + \
                     '%(user_utc_offset)s, ' + \
                     '%(user_location)s, ' + \
                     '%(user_created_at)s, ' + \
@@ -150,7 +153,8 @@ class DBWorker(threading.Thread, tweepy.StreamListener):
                     '%(user_statuses_count)s, ' + \
                     '%(user_friends_count)s, ' + \
                     '%(user_favourites_count)s, ' + \
-                    '%(user_lang_str)s ' + \
+                    '%(user_lang_str)s, ' + \
+                    '%(collector_id)s ' + \
                 ')' 
         self.cursor.execute(query, kwargs)   
         self.conn.commit()

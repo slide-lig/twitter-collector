@@ -3,27 +3,33 @@
 -- Name: registerOneTweet(...)
 --
 
-CREATE FUNCTION registerOneTweet(in_tweet_id BIGINT, in_user_id BIGINT, in_text TEXT, in_latitude DOUBLE PRECISION, in_longitude DOUBLE PRECISION, in_created_at TIMESTAMP WITH TIME ZONE, in_captured_at TIMESTAMP WITH TIME ZONE, in_user_utc_offset INTEGER, in_user_location TEXT, in_user_created_at TIMESTAMP WITH TIME ZONE, in_user_followers_count INTEGER, in_user_statuses_count INTEGER, in_user_friends_count INTEGER, in_user_favourites_count INTEGER, in_user_lang_str TEXT) RETURNS VOID AS
+CREATE FUNCTION getLangID(in_lang_str TEXT) RETURNS INTEGER AS
 $$
 DECLARE
-	user_lang_id INTEGER;
+    result_lang_id INTEGER;
+BEGIN
+    SELECT lang_id INTO result_lang_id FROM languages WHERE lang_str = in_lang_str;
+	IF NOT FOUND THEN
+        -- first time we see this language, register it
+        BEGIN
+            INSERT INTO languages(lang_str) VALUES (in_lang_str) 
+                    RETURNING lang_id INTO result_lang_id;
+        EXCEPTION WHEN unique_violation THEN
+            -- apparently a concurrent worker was faster than us at inserting this
+            SELECT lang_id INTO result_lang_id FROM languages WHERE lang_str = in_lang_str;
+        END;
+	END IF;
+    RETURN result_lang_id;
+END
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION registerOneTweet(in_tweet_id BIGINT, in_user_id BIGINT, in_text TEXT, in_latitude DOUBLE PRECISION, in_longitude DOUBLE PRECISION, in_created_at TIMESTAMP WITH TIME ZONE, in_captured_at TIMESTAMP WITH TIME ZONE, in_lang_str TEXT, in_user_utc_offset INTEGER, in_user_location TEXT, in_user_created_at TIMESTAMP WITH TIME ZONE, in_user_followers_count INTEGER, in_user_statuses_count INTEGER, in_user_friends_count INTEGER, in_user_favourites_count INTEGER, in_user_lang_str TEXT, in_collector_id INTEGER) RETURNS VOID AS
+$$
+DECLARE
     user_stats_id_now BIGINT;
     user_stats_id_first_seen BIGINT;
     
 BEGIN
-    -- retrieve lang_id of current user
-    SELECT lang_id INTO user_lang_id FROM languages WHERE lang_str = in_user_lang_str;
-	IF NOT FOUND THEN
-        -- first time we see this language, register it
-        BEGIN
-            INSERT INTO languages(lang_str) VALUES (in_user_lang_str) 
-                    RETURNING lang_id INTO user_lang_id;
-        EXCEPTION WHEN unique_violation THEN
-            -- apparently a concurrent worker was faster than us at inserting this
-            SELECT lang_id INTO user_lang_id FROM languages WHERE lang_str = in_user_lang_str;
-        END;
-	END IF;
-
     -- retrieve stats_now of current user
     SELECT stats_now INTO user_stats_id_now FROM twitter_user WHERE user_id = in_user_id;
 	IF NOT FOUND THEN
@@ -38,7 +44,7 @@ BEGIN
                 RETURNING user_stats_id INTO user_stats_id_now;
         -- insert the user
 		INSERT INTO twitter_user(user_id, utc_offset, location, created_at, first_seen_at, lang_id, stats_first_seen, stats_now) 
-                VALUES (in_user_id, in_user_utc_offset, in_user_location, in_user_created_at, now(), user_lang_id, user_stats_id_first_seen, user_stats_id_now);
+                VALUES (in_user_id, in_user_utc_offset, in_user_location, in_user_created_at, now(), getLangID(in_user_lang_str), user_stats_id_first_seen, user_stats_id_now);
 	ELSE 
         -- update running stats of this user
 		UPDATE user_stats 
@@ -51,8 +57,8 @@ BEGIN
 
     -- it seems twitter API may report twice the same tweet sometimes.
     IF NOT EXISTS (SELECT 1 FROM tweet where tweet_id = in_tweet_id) THEN
-        INSERT INTO tweet(tweet_id, user_id, text, gps, created_at, captured_at, saved_at, user_tweet_num)   
-            VALUES (in_tweet_id, in_user_id, in_text, ST_SetSRID(ST_MakePoint(in_longitude, in_latitude),4326), in_created_at, in_captured_at, now(), in_user_statuses_count);
+        INSERT INTO tweet(tweet_id, user_id, text, gps, created_at, captured_at, saved_at, user_tweet_num, collector_id, lang_id)   
+            VALUES (in_tweet_id, in_user_id, in_text, ST_SetSRID(ST_MakePoint(in_longitude, in_latitude),4326), in_created_at, in_captured_at, now(), in_user_statuses_count, in_collector_id, getLangID(in_lang_str));
     END IF;
 END
 $$ LANGUAGE plpgsql;
@@ -98,6 +104,15 @@ CREATE TABLE twitter_user (
 
 
 --
+-- Name: collector; Type: TABLE; Schema: public; Owner: twitter; Tablespace: 
+--
+
+CREATE TABLE collector (
+    collector_id serial PRIMARY KEY,
+    description text
+);
+
+--
 -- Name: tweet; Type: TABLE; Schema: public; Owner: twitter; Tablespace: 
 --
 
@@ -110,6 +125,8 @@ CREATE TABLE tweet (
     user_tweet_num integer,
     saved_at timestamp with time zone,
     gps geometry(Point,4326)
+    collector_id integer references collector(collector_id);
+    lang_id integer references languages(lang_id);
 );
 
 CREATE INDEX ON tweet (created_at);

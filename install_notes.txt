@@ -43,8 +43,8 @@ twitterdb=# \q
 
 psql -h localhost -U twitter_collector twitterdb
 [enter the password]
-twitterdb=# \i /tmp/db.dump
-twitterdb=# \q
+twitterdb=> \i /tmp/db.dump
+twitterdb=> \q
 
 # optionnaly update access permissions
 vi /etc/postgresql/9.1/main/pg_hba.conf
@@ -52,6 +52,17 @@ vi /etc/postgresql/9.1/main/pg_hba.conf
 
 exit    # return to root
 exit    # return to your unprivileged user
+
+# add an entry in table collector of the db
+psql -h localhost -U twitter_collector twitterdb
+twitterdb=> insert into collector(description) values ('test collector');
+twitterdb=> select * from collector;
+ collector_id |  description   
+--------------+----------------
+            1 | test collector
+(1 ligne)
+twitterdb=> 
+Save the collector_id for the conf.json file (see below).
 
 # collector configuration
 cd [...]/twitter-collector
