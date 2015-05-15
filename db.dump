@@ -1,14 +1,3 @@
---
--- Name: plpgsql; Type: EXTENSION; Schema: -; Owner: 
---
-
-CREATE EXTENSION IF NOT EXISTS plpgsql WITH SCHEMA pg_catalog;
-
---
--- Name: postgis; Type: EXTENSION; Schema: -; Owner: 
---
-
-CREATE EXTENSION IF NOT EXISTS postgis;
 
 --
 -- Name: registerTweet(...)
@@ -26,8 +15,13 @@ BEGIN
     SELECT lang_id INTO user_lang_id FROM languages WHERE lang_str = in_user_lang_str;
 	IF NOT FOUND THEN
         -- first time we see this language, register it
-		INSERT INTO languages(lang_str) VALUES (in_user_lang_str) 
-                RETURNING lang_id INTO user_lang_id;
+        BEGIN
+            INSERT INTO languages(lang_str) VALUES (in_user_lang_str) 
+                    RETURNING lang_id INTO user_lang_id;
+        EXCEPTION WHEN unique_violation THEN
+            -- apparently a concurrent worker was faster than us at inserting this
+            SELECT lang_id INTO user_lang_id FROM languages WHERE lang_str = in_user_lang_str;
+        END;
 	END IF;
 
     -- retrieve stats_now of current user

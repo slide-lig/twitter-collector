@@ -1,12 +1,29 @@
 
 # Notes for installing on a debian system.
-apt-get install postgresql
 
 # of course you need to have posgresql installed first.
+# for the client side we need a recent version of psycopg2 and tweepy
+sudo apt-get install postgresql python-dev libpq-dev \
+        postgresql-server-dev-all libxml2-dev libgdal-dev libproj-dev \
+        python-pip libffi-dev libssl-dev
+sudo pip install 'pip>1.5' --upgrade
+sudo pip install psycopg2 tweepy requests[security]
+
+# install postgis extension
+wget http://download.osgeo.org/postgis/source/postgis-2.1.7.tar.gz
+tar xfz postgis-2.1.7.tar.gz 
+cd postgis-2.1.7
+./configure
+make
+sudo make install
+
+# copy the database dumps somewhere they will reachable by the postgres user
+cp [...]/twitter-collector/db*.dump /tmp
 
 # we will get a lot of data.
 # it is advised to store this data on a partition where we have 
 # enough space. for this we create a tablespace.
+sudo su
 cd /data/
 mkdir postgres
 chown postgres:postgres postgres
@@ -17,17 +34,28 @@ mkdir tablespace
 psql
 
 postgres=# CREATE TABLESPACE tablespace_data LOCATION '/data/postgres/tablespace';
-postgres=# CREATE USER twitter WITH PASSWORD '<a_password>';
-postgres=# CREATE DATABASE twitterdb OWNER twitter TABLESPACE=tablespace_data;
+postgres=# CREATE USER twitter_collector WITH ENCRYPTED PASSWORD '<a_password>';
+postgres=# CREATE DATABASE twitterdb OWNER twitter_collector TABLESPACE=tablespace_data;
+postgres=# \c twitterdb
+You are now connected to database "twitterdb" as user "postgres".
+twitterdb=# \i /tmp/db-admin.dump
+twitterdb=# \q
 
-# we can now create the database.
-su - <yourself>
-cd [...]/twitter-collector 
-cat db.dump | psql -U twitter twitterdb
+psql -h localhost -U twitter_collector twitterdb
+[enter the password]
+twitterdb=# \i /tmp/db.dump
+twitterdb=# \q
 
-# for the client side we need a recent version of psycopg2 and tweepy
-apt-get install python-dev libpq-dev
-pip install psycopg2 tweepy
+# optionnaly update access permissions
+vi /etc/postgresql/9.1/main/pg_hba.conf
+/usr/lib/postgresql/9.1/bin/pg_ctl -D /var/lib/postgresql/9.1/main reload
 
+exit    # return to root
+exit    # return to your unprivileged user
+
+# collector configuration
+cd [...]/twitter-collector
+cp conf.sample.json conf.json
+vi conf.json    # update appropriately
 
 
