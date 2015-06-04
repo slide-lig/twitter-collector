@@ -1,4 +1,33 @@
 
+CREATE OR REPLACE FUNCTION hashtag_matches(text)
+RETURNS TABLE (hashtag text)
+LANGUAGE SQL
+AS $$
+    SELECT lower(unnest(regexp_matches($1, E'#([[:alnum:]]+)', 'g')));
+$$
+;
+
+CREATE OR REPLACE FUNCTION record_hashtags(bigint, text)
+RETURNS void
+LANGUAGE SQL
+AS $$
+    WITH cur_q AS (
+            SELECT hashtag, hashtag_id 
+            FROM hashtag_matches($2) AS m 
+            LEFT JOIN hashtags ON m.hashtag = hashtags.name),
+         ins_q AS (
+            INSERT INTO hashtags(name) 
+                (SELECT hashtag 
+                 FROM cur_q
+                 WHERE hashtag_id IS NULL)
+            RETURNING *)
+    INSERT INTO tweet_hashtag(tweet_id, hashtag_id)
+        (SELECT $1, greatest(cur_q.hashtag_id, ins_q.hashtag_id)
+    FROM cur_q 
+    LEFT JOIN ins_q ON cur_q.hashtag = ins_q.name);
+$$
+;
+
 --
 -- Name: registerOneTweet(...)
 --
@@ -140,10 +169,20 @@ CREATE TABLE stats_per_period(
     num_tweets_captured bigint
 );
 
-insert into stats_per_period(
+INSERT INTO stats_per_period(
             last_period_id, end_of_period, num_tweets_emitted, num_tweets_captured)
-            values (null, current_timestamp, 0, 0);
+            VALUES (null, current_timestamp, 0, 0);
 
+CREATE TABLE hashtags(
+    hashtag_id serial PRIMARY KEY, 
+    name text UNIQUE
+);
+
+CREATE TABLE tweet_hashtag(
+    tweet_id bigint REFERENCES tweet(tweet_id), 
+    hashtag_id integer REFERENCES hashtags(hashtag_id)
+);
+CREATE INDEX ON tweet_hashtag(hashtag_id);
 
 --
 -- PostgreSQL database dump complete
