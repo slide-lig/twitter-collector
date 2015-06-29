@@ -61,7 +61,7 @@ BEGIN
             VALUES (in_tweet_id, in_user_id, in_text, ST_SetSRID(ST_MakePoint(in_longitude, in_latitude),4326), in_created_at, in_captured_at, now(), in_user_statuses_count, in_collector_id, getLangID(in_lang_str));
 
         -- find hashtags in tweet text and record them
-        SELECT record_hashtags(tweet_id, text);
+        PERFORM record_hashtags(in_tweet_id, in_text);
     END IF;
 END
 $$ LANGUAGE plpgsql;
