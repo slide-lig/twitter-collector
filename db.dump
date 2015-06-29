@@ -3,7 +3,7 @@
 -- Name: registerOneTweet(...)
 --
 
-CREATE FUNCTION getLangID(in_lang_str TEXT) RETURNS INTEGER AS
+CREATE OR REPLACE FUNCTION getLangID(in_lang_str TEXT) RETURNS INTEGER AS
 $$
 DECLARE
     result_lang_id INTEGER;
@@ -23,7 +23,7 @@ BEGIN
 END
 $$ LANGUAGE plpgsql;
 
-CREATE FUNCTION registerOneTweet(in_tweet_id BIGINT, in_user_id BIGINT, in_text TEXT, in_latitude DOUBLE PRECISION, in_longitude DOUBLE PRECISION, in_created_at TIMESTAMP WITH TIME ZONE, in_captured_at TIMESTAMP WITH TIME ZONE, in_lang_str TEXT, in_user_utc_offset INTEGER, in_user_location TEXT, in_user_created_at TIMESTAMP WITH TIME ZONE, in_user_followers_count INTEGER, in_user_statuses_count INTEGER, in_user_friends_count INTEGER, in_user_favourites_count INTEGER, in_user_lang_str TEXT, in_collector_id INTEGER) RETURNS VOID AS
+CREATE OR REPLACE FUNCTION registerOneTweet(in_tweet_id BIGINT, in_user_id BIGINT, in_text TEXT, in_latitude DOUBLE PRECISION, in_longitude DOUBLE PRECISION, in_created_at TIMESTAMP WITH TIME ZONE, in_captured_at TIMESTAMP WITH TIME ZONE, in_lang_str TEXT, in_user_utc_offset INTEGER, in_user_location TEXT, in_user_created_at TIMESTAMP WITH TIME ZONE, in_user_followers_count INTEGER, in_user_statuses_count INTEGER, in_user_friends_count INTEGER, in_user_favourites_count INTEGER, in_user_lang_str TEXT, in_collector_id INTEGER) RETURNS VOID AS
 $$
 DECLARE
     user_stats_id_now BIGINT;
@@ -59,6 +59,9 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM tweet where tweet_id = in_tweet_id) THEN
         INSERT INTO tweet(tweet_id, user_id, text, gps, created_at, captured_at, saved_at, user_tweet_num, collector_id, lang_id)   
             VALUES (in_tweet_id, in_user_id, in_text, ST_SetSRID(ST_MakePoint(in_longitude, in_latitude),4326), in_created_at, in_captured_at, now(), in_user_statuses_count, in_collector_id, getLangID(in_lang_str));
+
+        -- find hashtags in tweet text and record them
+        SELECT record_hashtags(tweet_id, text);
     END IF;
 END
 $$ LANGUAGE plpgsql;
