@@ -7,6 +7,10 @@
     "db_name":              "twitterdb",
     "db_user":              "twitter_collector",
     "db_password":          "XXXXXX",
+    "api_filter":	    {
+	"locations": [ -73, -22.9, 10,  4.6,
+                       23,  38.1, 111, 42.3]
+    },
     "num_workers":          20,
     "collector_id":         1
 }

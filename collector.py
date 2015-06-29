@@ -43,7 +43,7 @@ class Collector(tweepy.StreamListener):
             self.printer.log("Connected to twitter API.")
             
             # start collection
-            stream.filter(locations=[-180,-90,180,90])
+            stream.filter(**conf.api_filter)
         except KeyboardInterrupt:
             pass
         except Exception, e:
