@@ -1,33 +1,4 @@
 
-CREATE OR REPLACE FUNCTION hashtag_matches(text)
-RETURNS TABLE (hashtag text)
-LANGUAGE SQL
-AS $$
-    SELECT lower(unnest(regexp_matches($1, E'#([[:alnum:]]+)', 'g')));
-$$
-;
-
-CREATE OR REPLACE FUNCTION record_hashtags(bigint, text)
-RETURNS void
-LANGUAGE SQL
-AS $$
-    WITH cur_q AS (
-            SELECT hashtag, hashtag_id 
-            FROM hashtag_matches($2) AS m 
-            LEFT JOIN hashtags ON m.hashtag = hashtags.name),
-         ins_q AS (
-            INSERT INTO hashtags(name) 
-                (SELECT hashtag 
-                 FROM cur_q
-                 WHERE hashtag_id IS NULL)
-            RETURNING *)
-    INSERT INTO tweet_hashtag(tweet_id, hashtag_id)
-        (SELECT $1, greatest(cur_q.hashtag_id, ins_q.hashtag_id)
-    FROM cur_q 
-    LEFT JOIN ins_q ON cur_q.hashtag = ins_q.name);
-$$
-;
-
 --
 -- Name: registerOneTweet(...)
 --
@@ -153,9 +124,9 @@ CREATE TABLE tweet (
     captured_at timestamp with time zone,
     user_tweet_num integer,
     saved_at timestamp with time zone,
-    gps geometry(Point,4326)
-    collector_id integer references collector(collector_id);
-    lang_id integer references languages(lang_id);
+    gps geometry(Point,4326),
+    collector_id integer references collector(collector_id),
+    lang_id integer references languages(lang_id)
 );
 
 CREATE INDEX ON tweet (created_at);
@@ -183,6 +154,35 @@ CREATE TABLE tweet_hashtag(
     hashtag_id integer REFERENCES hashtags(hashtag_id)
 );
 CREATE INDEX ON tweet_hashtag(hashtag_id);
+
+CREATE OR REPLACE FUNCTION hashtag_matches(text)
+RETURNS TABLE (hashtag text)
+LANGUAGE SQL
+AS $$
+    SELECT lower(unnest(regexp_matches($1, E'#([[:alnum:]]+)', 'g')));
+$$
+;
+
+CREATE OR REPLACE FUNCTION record_hashtags(bigint, text)
+RETURNS void
+LANGUAGE SQL
+AS $$
+    WITH cur_q AS (
+            SELECT hashtag, hashtag_id
+            FROM hashtag_matches($2) AS m
+            LEFT JOIN hashtags ON m.hashtag = hashtags.name),
+         ins_q AS (
+            INSERT INTO hashtags(name)
+                (SELECT hashtag
+                 FROM cur_q
+                 WHERE hashtag_id IS NULL)
+            RETURNING *)
+    INSERT INTO tweet_hashtag(tweet_id, hashtag_id)
+        (SELECT $1, greatest(cur_q.hashtag_id, ins_q.hashtag_id)
+    FROM cur_q
+    LEFT JOIN ins_q ON cur_q.hashtag = ins_q.name);
+$$
+;
 
 --
 -- PostgreSQL database dump complete
