@@ -1,71 +1,5 @@
 
---
--- Name: registerOneTweet(...)
---
-
-CREATE OR REPLACE FUNCTION getLangID(in_lang_str TEXT) RETURNS INTEGER AS
-$$
-DECLARE
-    result_lang_id INTEGER;
-BEGIN
-    SELECT lang_id INTO result_lang_id FROM languages WHERE lang_str = in_lang_str;
-	IF NOT FOUND THEN
-        -- first time we see this language, register it
-        BEGIN
-            INSERT INTO languages(lang_str) VALUES (in_lang_str) 
-                    RETURNING lang_id INTO result_lang_id;
-        EXCEPTION WHEN unique_violation THEN
-            -- apparently a concurrent worker was faster than us at inserting this
-            SELECT lang_id INTO result_lang_id FROM languages WHERE lang_str = in_lang_str;
-        END;
-	END IF;
-    RETURN result_lang_id;
-END
-$$ LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION registerOneTweet(in_tweet_id BIGINT, in_user_id BIGINT, in_text TEXT, in_latitude DOUBLE PRECISION, in_longitude DOUBLE PRECISION, in_created_at TIMESTAMP WITH TIME ZONE, in_captured_at TIMESTAMP WITH TIME ZONE, in_lang_str TEXT, in_user_utc_offset INTEGER, in_user_location TEXT, in_user_created_at TIMESTAMP WITH TIME ZONE, in_user_followers_count INTEGER, in_user_statuses_count INTEGER, in_user_friends_count INTEGER, in_user_favourites_count INTEGER, in_user_lang_str TEXT, in_collector_id INTEGER) RETURNS VOID AS
-$$
-DECLARE
-    user_stats_id_now BIGINT;
-    user_stats_id_first_seen BIGINT;
-    
-BEGIN
-    -- retrieve stats_now of current user
-    SELECT stats_now INTO user_stats_id_now FROM twitter_user WHERE user_id = in_user_id;
-	IF NOT FOUND THEN
-        -- first time we see this user
-        -- insert 2 records in table user_stats, one for stats_first_seen (initial stats) 
-        -- and one for stats_now (running stats updated at each tweet)
-        INSERT INTO user_stats(followers_count, statuses_count, friends_count, favourites_count) 
-                VALUES (in_user_followers_count, in_user_statuses_count, in_user_friends_count, in_user_favourites_count)
-                RETURNING user_stats_id INTO user_stats_id_first_seen;
-        INSERT INTO user_stats(followers_count, statuses_count, friends_count, favourites_count) 
-                VALUES (in_user_followers_count, in_user_statuses_count, in_user_friends_count, in_user_favourites_count)
-                RETURNING user_stats_id INTO user_stats_id_now;
-        -- insert the user
-		INSERT INTO twitter_user(user_id, utc_offset, location, created_at, first_seen_at, lang_id, stats_first_seen, stats_now) 
-                VALUES (in_user_id, in_user_utc_offset, in_user_location, in_user_created_at, now(), getLangID(in_user_lang_str), user_stats_id_first_seen, user_stats_id_now);
-	ELSE 
-        -- update running stats of this user
-		UPDATE user_stats 
-                SET followers_count = in_user_followers_count, 
-                    statuses_count = in_user_statuses_count, 
-                    friends_count = in_user_friends_count, 
-                    favourites_count = in_user_favourites_count 
-                WHERE user_stats_id = user_stats_id_now;
-    END IF;
-
-    -- it seems twitter API may report twice the same tweet sometimes.
-    IF NOT EXISTS (SELECT 1 FROM tweet where tweet_id = in_tweet_id) THEN
-        INSERT INTO tweet(tweet_id, user_id, text, gps, created_at, captured_at, saved_at, user_tweet_num, collector_id, lang_id)   
-            VALUES (in_tweet_id, in_user_id, in_text, ST_SetSRID(ST_MakePoint(in_longitude, in_latitude),4326), in_created_at, in_captured_at, now(), in_user_statuses_count, in_collector_id, getLangID(in_lang_str));
-
-        -- find hashtags in tweet text and record them
-        PERFORM record_hashtags(in_tweet_id, in_text);
-    END IF;
-END
-$$ LANGUAGE plpgsql;
-
+SET client_min_messages TO WARNING;
 
 --
 -- Name: languages; Type: TABLE; Schema: public; Owner: twitter; Tablespace: 
@@ -144,7 +78,8 @@ CREATE TABLE stats_per_period(
 );
 
 INSERT INTO stats_per_period(
-            last_period_id, end_of_period, num_tweets_emitted, num_tweets_captured)
+            last_period_id, end_of_period, num_tweets_emitted,
+                num_tweets_captured)
             VALUES (null, current_timestamp, 0, 0);
 
 CREATE TABLE hashtags(
@@ -158,6 +93,126 @@ CREATE TABLE tweet_hashtag(
 );
 CREATE INDEX ON tweet_hashtag(hashtag_id);
 
+--
+-- Meta-programming part.
+-- With postgresql it is not easy to implement
+-- insert-if-not-exist features handling concurrency.
+-- we create a meta-function that will be able to
+-- generate the code of these insert-if-not-exist functions.
+--
+
+CREATE OR REPLACE FUNCTION declare_get_or_insert_function(
+    func_name TEXT,
+    func_params_with_types TEXT,
+    in_table TEXT,
+    search_filter TEXT,
+    insert_query TEXT
+    ) RETURNS TEXT AS
+$$
+BEGIN
+    -- we create a table containing no records (see LIMIT 0)
+    -- what we want is to refer to its column names and types later.
+    -- columns are the same as table in_table plus a boolean is_new
+    -- that allows to know if the row was just inserted or not. 
+    EXECUTE format($FORMAT_STR$
+        DROP TABLE IF EXISTS __internal_%s_type_desc CASCADE;
+        CREATE TABLE __internal_%s_type_desc AS 
+            SELECT *, TRUE as is_new from %I LIMIT 0;
+    $FORMAT_STR$, 
+    func_name,
+    func_name, in_table);
+
+    EXECUTE format($FORMAT_STR$
+        DROP FUNCTION IF EXISTS %s(%s);
+        CREATE OR REPLACE FUNCTION %s(%s, OUT res __internal_%s_type_desc)
+        AS $DYN_FUNC$
+        BEGIN
+            LOOP
+            -- try to get any existing value
+            SELECT *, FALSE INTO res FROM %I WHERE %s;
+            IF found THEN
+                EXIT;  -- exit loop
+            END IF;
+            -- not there, so try to insert the value
+            -- if someone else inserts the same concurrently,
+            -- we could get a unique-key failure
+            BEGIN
+                %s RETURNING *, TRUE INTO res;
+                EXIT;  -- exit loop
+            EXCEPTION WHEN unique_violation THEN
+                -- Do nothing, and loop to try the SELECT again.
+            END;
+            END LOOP;
+        END
+        $DYN_FUNC$
+        LANGUAGE plpgsql;
+    $FORMAT_STR$, 
+    func_name, func_params_with_types,
+    func_name, func_params_with_types, func_name, 
+    in_table, search_filter, 
+    insert_query);
+
+    RETURN func_name;
+END
+$$ LANGUAGE plpgsql;
+
+-- we now use declare_get_or_insert_function()
+-- to create the following functions:
+-- getHashtag(), getLanguage(), getOrInsertUser()
+-- getOrInsertTweet()
+
+SELECT declare_get_or_insert_function(
+        'getHashtag',
+        'in_name TEXT',
+        'hashtags',
+        'name = in_name',
+        'INSERT INTO hashtags(name) VALUES (in_name)');
+
+SELECT declare_get_or_insert_function(
+        'getLanguage',
+        'in_lang_str TEXT',
+        'languages',
+        'lang_str = in_lang_str',
+        'INSERT INTO languages(lang_str) VALUES (in_lang_str)');
+
+SELECT declare_get_or_insert_function(
+        'getOrInsertUser',
+        $PARAMS$
+        in_user_id BIGINT, in_user_utc_offset INTEGER, in_user_location TEXT, 
+        in_user_created_at TIMESTAMP WITH TIME ZONE, in_user_lang_str TEXT
+        $PARAMS$,
+        'twitter_user',
+        'user_id = in_user_id',
+        $INSERT_QUERY$
+        INSERT INTO twitter_user(user_id, utc_offset, location, created_at,
+                            first_seen_at, lang_id)
+            VALUES (in_user_id, in_user_utc_offset, in_user_location,
+             in_user_created_at, now(), (getLanguage(in_user_lang_str)).lang_id)
+        $INSERT_QUERY$);
+
+SELECT declare_get_or_insert_function(
+        'getOrInsertTweet',
+        $PARAMS$
+        in_tweet_id BIGINT, in_user_id BIGINT, in_text TEXT,
+        in_latitude DOUBLE PRECISION, in_longitude DOUBLE PRECISION,
+        in_created_at TIMESTAMP WITH TIME ZONE, in_captured_at TIMESTAMP WITH TIME ZONE,
+        in_user_statuses_count INTEGER, in_collector_id INTEGER, in_lang_str TEXT
+        $PARAMS$,
+        'tweet',
+        'tweet_id = in_tweet_id',
+        $INSERT_QUERY$
+        INSERT INTO tweet(tweet_id, user_id, text, gps, created_at, captured_at, 
+                           saved_at, user_tweet_num, collector_id, lang_id)
+            VALUES (in_tweet_id, in_user_id, in_text,
+                    ST_SetSRID(ST_MakePoint(in_longitude, in_latitude),4326),
+                    in_created_at, in_captured_at, now(),
+                    in_user_statuses_count, in_collector_id,
+                    (getLanguage(in_lang_str)).lang_id)
+        $INSERT_QUERY$);
+
+-- we have one more subfunction to parse the tweet
+-- and find hashtags
+
 CREATE OR REPLACE FUNCTION hashtag_matches(text)
 RETURNS TABLE (hashtag text)
 LANGUAGE SQL
@@ -166,28 +221,77 @@ AS $$
 $$
 ;
 
-CREATE OR REPLACE FUNCTION record_hashtags(bigint, text)
-RETURNS void
-LANGUAGE SQL
-AS $$
-    WITH cur_q AS (
-            SELECT hashtag, hashtag_id
-            FROM hashtag_matches($2) AS m
-            LEFT JOIN hashtags ON m.hashtag = hashtags.name),
-         ins_q AS (
-            INSERT INTO hashtags(name)
-                (SELECT hashtag
-                 FROM cur_q
-                 WHERE hashtag_id IS NULL)
-            RETURNING *)
-    INSERT INTO tweet_hashtag(tweet_id, hashtag_id)
-        (SELECT $1, greatest(cur_q.hashtag_id, ins_q.hashtag_id)
-    FROM cur_q
-    LEFT JOIN ins_q ON cur_q.hashtag = ins_q.name);
+-- and here comes the main function that will be called from the
+-- collector each time we capture a tweet.
+CREATE OR REPLACE FUNCTION registerOneTweet(
+        in_tweet_id BIGINT, in_user_id BIGINT, in_text TEXT, 
+        in_latitude DOUBLE PRECISION, in_longitude DOUBLE PRECISION, 
+        in_created_at TIMESTAMP WITH TIME ZONE, 
+        in_captured_at TIMESTAMP WITH TIME ZONE, 
+        in_lang_str TEXT, in_user_utc_offset INTEGER, 
+        in_user_location TEXT, in_user_created_at TIMESTAMP WITH TIME ZONE, 
+        in_user_followers_count INTEGER, in_user_statuses_count INTEGER, 
+        in_user_friends_count INTEGER, in_user_favourites_count INTEGER, 
+        in_user_lang_str TEXT, in_collector_id INTEGER) RETURNS VOID AS
 $$
-;
+DECLARE
+    user_is_new boolean;
+    tweet_is_new boolean;
+    user_stats_id_now BIGINT;
+    user_stats_id_first_seen BIGINT;
+    
+BEGIN
+    -- retrieve or insert user profile data
+    SELECT INTO user_is_new, user_stats_id_now 
+        is_new, stats_now
+    FROM getOrInsertUser(in_user_id, in_user_utc_offset, in_user_location,
+                 in_user_created_at, in_user_lang_str);
 
---
--- PostgreSQL database dump complete
---
+    IF user_is_new THEN
+        -- first time we see this user
+        -- insert 2 records in table user_stats,
+        -- one for stats_first_seen (initial stats) 
+        -- and one for stats_now (running stats updated
+        -- at each tweet)
+        INSERT INTO user_stats(followers_count, statuses_count,
+                            friends_count, favourites_count) 
+            VALUES (in_user_followers_count, in_user_statuses_count,
+                in_user_friends_count, in_user_favourites_count)
+            RETURNING user_stats_id INTO user_stats_id_first_seen;
+        INSERT INTO user_stats(followers_count, statuses_count,
+                            friends_count, favourites_count) 
+            VALUES (in_user_followers_count, in_user_statuses_count,
+                in_user_friends_count, in_user_favourites_count)
+            RETURNING user_stats_id INTO user_stats_id_now;
+        UPDATE twitter_user
+            SET stats_first_seen = user_stats_id_first_seen,
+                stats_now = user_stats_id_now
+            WHERE user_id = in_user_id;
+    ELSE
+        -- just check that the creation of stats objects was done
+        IF user_stats_id_now IS NOT NULL THEN
+            -- ok, update running stats of this user
+            UPDATE user_stats 
+                SET followers_count = in_user_followers_count, 
+                    statuses_count = in_user_statuses_count, 
+                    friends_count = in_user_friends_count, 
+                    favourites_count = in_user_favourites_count 
+                WHERE user_stats_id = user_stats_id_now;
+        END IF;
+    END IF;
+
+    -- record the tweet itself and associated metadata
+    SELECT INTO tweet_is_new
+        (getOrInsertTweet(
+            in_tweet_id, in_user_id, in_text,
+            in_latitude, in_longitude, 
+            in_created_at, in_captured_at,
+            in_user_statuses_count, in_collector_id, in_lang_str)).is_new;
+    IF tweet_is_new THEN
+        -- compute and record hashtags
+        INSERT INTO tweet_hashtag(tweet_id, hashtag_id)
+            SELECT in_tweet_id, (getHashtag(hashtag_matches(in_text))).hashtag_id;
+    END IF; 
+END
+$$ LANGUAGE plpgsql;
 
