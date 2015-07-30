@@ -112,9 +112,30 @@ class DBWorker(threading.Thread, tweepy.StreamListener):
         else:
             return tweet.coordinates['coordinates']
 
+    def get_place_bounding_box_as_geojson(self, tweet):
+        # we cannot efficiently use tweepy's BoundingBox object for that,
+        # we have to use the unaltered json object
+        return json.dumps(tweet._json['place']['bounding_box'])
+
+    def get_place_id_as_bigint(self, place):
+        # place id is given as a 16-hex-chars string.
+        # that's exactly 64bits, thus it can be stored as a bigint
+        # in the postgresql database.
+        # but bigint is signed, thus we have to shift the value
+        # to make it match the allowed range of bigint.
+        return eval('0x' + place.id + ' - 0x8000000000000000')
+
     def on_status(self, tweet):
             self.last_tweet = tweet # for debugging purpose
             coordinates = self.get_coordinates(tweet)
+            if tweet.place:
+                place_id = self.get_place_id_as_bigint(tweet.place)
+                place_bbox = self.get_place_bounding_box_as_geojson(tweet)
+                place_type = tweet.place.place_type
+                place_name = tweet.place.full_name
+            else:
+                place_id, place_bbox, place_type, place_name = \
+                    None, None, None, None
             user = tweet.user
             tweet.created_at = tweet.created_at.replace(tzinfo = TZ_UTC)
             user.created_at = user.created_at.replace(tzinfo = TZ_UTC)
@@ -134,10 +155,14 @@ class DBWorker(threading.Thread, tweepy.StreamListener):
                            user_friends_count = user.friends_count,
                         user_favourites_count = user.favourites_count,
                                 user_lang_str = user.lang,
+                                     place_id = place_id,
+                                   place_type = place_type,
+                                   place_name = place_name,
+                                   place_bbox = place_bbox,
                                  collector_id = self.conf.collector_id)
 
     def store_tweet_in_db(self, **kwargs):
-        query = 'SELECT registerOneTweet(' + \
+        query = 'SELECT registerTweetAndMetadata(' + \
                     '%(tweet_id)s, ' + \
                     '%(user_id)s, ' + \
                     '%(text)s, ' + \
@@ -154,6 +179,10 @@ class DBWorker(threading.Thread, tweepy.StreamListener):
                     '%(user_friends_count)s, ' + \
                     '%(user_favourites_count)s, ' + \
                     '%(user_lang_str)s, ' + \
+                    '%(place_id)s, ' + \
+                    '%(place_type)s, ' + \
+                    '%(place_name)s, ' + \
+                    '%(place_bbox)s, ' + \
                     '%(collector_id)s ' + \
                 ')' 
         self.cursor.execute(query, kwargs)   

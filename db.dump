@@ -49,6 +49,14 @@ CREATE TABLE collector (
     description text
 );
 
+CREATE TABLE place(
+    place_id bigint primary key,
+    place_type text,
+    place_name text,
+    place_bbox geometry
+);
+CREATE INDEX ON place USING gist (place_bbox);
+
 --
 -- Name: tweet; Type: TABLE; Schema: public; Owner: twitter; Tablespace: 
 --
@@ -63,7 +71,8 @@ CREATE TABLE tweet (
     saved_at timestamp with time zone,
     gps geometry(Point,4326),
     collector_id integer references collector(collector_id),
-    lang_id integer references languages(lang_id)
+    lang_id integer references languages(lang_id),
+    place_id bigint references place(place_id)
 );
 
 CREATE INDEX ON tweet (created_at);
@@ -191,23 +200,39 @@ SELECT declare_get_or_insert_function(
         $INSERT_QUERY$);
 
 SELECT declare_get_or_insert_function(
-        'getOrInsertTweet',
+        'getOrInsertPlace',
+        $PARAMS$
+        in_place_id BIGINT, in_place_type TEXT,
+        in_place_name TEXT, in_place_bbox TEXT
+        $PARAMS$,
+        'place',
+        'place_id = in_place_id',
+        $INSERT_QUERY$
+        INSERT INTO place(place_id, place_type, place_name, place_bbox)
+            VALUES (in_place_id, in_place_type, in_place_name,
+                    ST_SetSRID(ST_GeomFromGeoJSON(in_place_bbox), 4326))
+        $INSERT_QUERY$);
+
+SELECT declare_get_or_insert_function(
+        'getOrInsertTweetv2',
         $PARAMS$
         in_tweet_id BIGINT, in_user_id BIGINT, in_text TEXT,
         in_latitude DOUBLE PRECISION, in_longitude DOUBLE PRECISION,
         in_created_at TIMESTAMP WITH TIME ZONE, in_captured_at TIMESTAMP WITH TIME ZONE,
-        in_user_statuses_count INTEGER, in_collector_id INTEGER, in_lang_str TEXT
+        in_user_statuses_count INTEGER, in_collector_id INTEGER, in_lang_str TEXT,
+        in_place_id BIGINT
         $PARAMS$,
         'tweet',
         'tweet_id = in_tweet_id',
         $INSERT_QUERY$
         INSERT INTO tweet(tweet_id, user_id, text, gps, created_at, captured_at, 
-                           saved_at, user_tweet_num, collector_id, lang_id)
+                           saved_at, user_tweet_num, collector_id, lang_id, place_id)
             VALUES (in_tweet_id, in_user_id, in_text,
                     ST_SetSRID(ST_MakePoint(in_longitude, in_latitude),4326),
                     in_created_at, in_captured_at, now(),
                     in_user_statuses_count, in_collector_id,
-                    (getLanguage(in_lang_str)).lang_id)
+                    (getLanguage(in_lang_str)).lang_id,
+                    in_place_id)
         $INSERT_QUERY$);
 
 -- we have one more subfunction to parse the tweet
@@ -223,7 +248,7 @@ $$
 
 -- and here comes the main function that will be called from the
 -- collector each time we capture a tweet.
-CREATE OR REPLACE FUNCTION registerOneTweet(
+CREATE OR REPLACE FUNCTION registerTweetAndMetadata(
         in_tweet_id BIGINT, in_user_id BIGINT, in_text TEXT, 
         in_latitude DOUBLE PRECISION, in_longitude DOUBLE PRECISION, 
         in_created_at TIMESTAMP WITH TIME ZONE, 
@@ -232,7 +257,10 @@ CREATE OR REPLACE FUNCTION registerOneTweet(
         in_user_location TEXT, in_user_created_at TIMESTAMP WITH TIME ZONE, 
         in_user_followers_count INTEGER, in_user_statuses_count INTEGER, 
         in_user_friends_count INTEGER, in_user_favourites_count INTEGER, 
-        in_user_lang_str TEXT, in_collector_id INTEGER) RETURNS VOID AS
+        in_user_lang_str TEXT,
+        in_place_id BIGINT, in_place_type TEXT,
+        in_place_name TEXT, in_place_bbox TEXT,
+        in_collector_id INTEGER) RETURNS VOID AS
 $$
 DECLARE
     user_is_new boolean;
@@ -280,13 +308,20 @@ BEGIN
         END IF;
     END IF;
 
+    -- record the place data if seen for the 1st time
+    IF in_place_id IS NOT NULL THEN
+        PERFORM getOrInsertPlace(in_place_id, in_place_type,
+                                 in_place_name, in_place_bbox);
+    END IF;
+
     -- record the tweet itself and associated metadata
     SELECT INTO tweet_is_new
-        (getOrInsertTweet(
+        (getOrInsertTweetv2(
             in_tweet_id, in_user_id, in_text,
             in_latitude, in_longitude, 
             in_created_at, in_captured_at,
-            in_user_statuses_count, in_collector_id, in_lang_str)).is_new;
+            in_user_statuses_count, in_collector_id,
+            in_lang_str, in_place_id)).is_new;
     IF tweet_is_new THEN
         -- compute and record hashtags
         INSERT INTO tweet_hashtag(tweet_id, hashtag_id)
