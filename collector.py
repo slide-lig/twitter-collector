@@ -1,8 +1,7 @@
 #!/usr/bin/env python
-import psycopg2, tweepy, threading, time, json, sys
+import psycopg2, tweepy, multiprocessing, time, json, sys
 from utc import TZ_UTC
 from debug import debug_console
-from Queue import Queue
 from datetime import datetime
 
 LONGITUDE = 0
@@ -17,7 +16,7 @@ class Conf(object):
 
 class SyncPrinter(object):
     def __init__(self):
-        self.lock = threading.Lock()
+        self.lock = multiprocessing.Lock()
     def log(self, message):
         with self.lock:
             print("%s - %s" % (time.ctime(), str(message)))
@@ -28,7 +27,7 @@ class Collector(tweepy.StreamListener):
         self.printer = SyncPrinter()
 
         # create queue
-        self.queue = Queue()
+        self.queue = multiprocessing.Queue()
         
         # create db workers
         self.db_workers = [ DBWorker(i, self.queue, self.printer, conf) \
@@ -73,12 +72,10 @@ class Collector(tweepy.StreamListener):
     def on_timeout(self):
         self.printer.log('Snoozing Zzzzzz')
 
-        
-
-class DBWorker(threading.Thread, tweepy.StreamListener):
+class DBWorker(multiprocessing.Process, tweepy.StreamListener):
     
     def __init__(self, thread_num, queue, printer, conf):
-        threading.Thread.__init__(self)
+        multiprocessing.Process.__init__(self)
         tweepy.StreamListener.__init__(self)
         self.name = "DBWorker #%d" % thread_num
         self.queue = queue
