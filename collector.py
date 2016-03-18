@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import psycopg2, tweepy, threading, time, json
+import psycopg2, tweepy, threading, time, json, sys
 from utc import TZ_UTC
 from debug import debug_console
 from Queue import Queue
@@ -8,6 +8,7 @@ from datetime import datetime
 LONGITUDE = 0
 LATITUDE = 1
 STOP_COMMAND = 0
+QUEUE_SIZE_THRESHOLD = 1000 # approx. 12s collecting
 
 class Conf(object):
     def __init__(self):
@@ -55,10 +56,14 @@ class Collector(tweepy.StreamListener):
         for i in range(conf.num_workers):
             self.queue.put(STOP_COMMAND)
         self.printer.log('\nGoodbye!')
+        sys.exit()
 
     # delegate the processing to the workers as much as
     # possible.
     def on_data(self, raw_data):
+        if self.queue.qsize() > QUEUE_SIZE_THRESHOLD:
+            # it seems workers are no longer working
+            return False    # stop
         self.queue.put((datetime.now(), raw_data))
 
     def on_error(self, status_code):
