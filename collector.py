@@ -1,7 +1,8 @@
 #!/usr/bin/env python
-import psycopg2, tweepy, multiprocessing, time, json, sys
+import psycopg2, tweepy, multiprocessing, time, json, sys, os
 from utc import TZ_UTC
 from debug import debug_console
+from watchdog import WatchDog
 from datetime import datetime
 
 LONGITUDE = 0
@@ -22,15 +23,27 @@ class SyncPrinter(object):
             print("%s - %s" % (time.ctime(), str(message)))
 
 class Collector(tweepy.StreamListener):
+    def wd_notify(self):
+        self.wd_queue.put(os.getpid())
+
+    def wd_suspend(self):
+        self.wd_queue.put(-os.getpid())
+
     def main(self, conf):
         # create synchronized printer        
         self.printer = SyncPrinter()
 
-        # create queue
+        # create queues
         self.queue = multiprocessing.Queue()
-        
+        self.wd_queue = multiprocessing.Queue()
+
+        # create and start watchdog
+        wd = WatchDog(self.wd_queue)
+        wd.start()
+        self.wd_notify()
+
         # create db workers
-        self.db_workers = [ DBWorker(i, self.queue, self.printer, conf) \
+        self.db_workers = [ DBWorker(i, self.queue, self.wd_queue, self.printer, conf) \
                             for i in range(conf.num_workers) ]
         try:
             # start db workers
@@ -63,25 +76,32 @@ class Collector(tweepy.StreamListener):
         if self.queue.qsize() > QUEUE_SIZE_THRESHOLD:
             # it seems workers are no longer working
             return False    # stop
+        self.wd_notify()
         self.queue.put((datetime.now(), raw_data))
 
     def on_error(self, status_code):
+        self.wd_notify()
         self.printer.log('An error has occured! Status code = %s' % status_code)
         return True  # keep stream alive
 
     def on_timeout(self):
+        self.wd_suspend()
         self.printer.log('Snoozing Zzzzzz')
 
 class DBWorker(multiprocessing.Process, tweepy.StreamListener):
     
-    def __init__(self, thread_num, queue, printer, conf):
+    def __init__(self, thread_num, queue, wd_queue, printer, conf):
         multiprocessing.Process.__init__(self)
         tweepy.StreamListener.__init__(self)
         self.name = "DBWorker #%d" % thread_num
         self.queue = queue
         self.printer = printer
         self.conf = conf
+        self.wd_queue = wd_queue
         
+    def wd_notify(self):
+        self.wd_queue.put(os.getpid())
+
     def run(self):
         self.conn = psycopg2.connect(
                 host=self.conf.db_host,
@@ -93,6 +113,7 @@ class DBWorker(multiprocessing.Process, tweepy.StreamListener):
             self.printer.log("%s: Connected to database." % self.name)
             running = True
             while running:
+                self.wd_notify()
                 item = self.queue.get()
                 if item == STOP_COMMAND:
                     running = False
