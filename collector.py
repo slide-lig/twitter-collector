@@ -102,7 +102,6 @@ class DBWorker(multiprocessing.Process, tweepy.StreamListener):
                     # on_data() should call on_status() or similar methods 
                     # defined below
                     self.on_data(raw_data)
-                self.queue.task_done()
         finally:
             self.cursor.close()
             self.conn.close()
