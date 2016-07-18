@@ -10,7 +10,7 @@ then
         sleep 3
     done
 else
-    ps_num=$(ps -ef | grep collector.py | grep -v grep | wc -l)
+    ps_num=$(screen -ls | grep collector | wc -l)
     if [ $ps_num -gt 0 ]
     then
         echo 'Collector is already running.'
