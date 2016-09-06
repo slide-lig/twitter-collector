@@ -9,6 +9,7 @@ LONGITUDE = 0
 LATITUDE = 1
 STOP_COMMAND = 0
 QUEUE_SIZE_THRESHOLD = 1000 # approx. 12s collecting
+MAX_SILENCE = 60 # secs
 
 class Conf(object):
     def __init__(self):
@@ -26,8 +27,8 @@ class Collector(tweepy.StreamListener):
     def wd_notify(self):
         self.wd_queue.put(os.getpid())
 
-    def wd_suspend(self):
-        self.wd_queue.put(-os.getpid())
+    def wd_delay(self):
+        self.wd_queue.put(0)
 
     def main(self, conf):
         # create synchronized printer        
@@ -36,6 +37,10 @@ class Collector(tweepy.StreamListener):
         # create queues
         self.queue = multiprocessing.Queue()
         self.wd_queue = multiprocessing.Queue()
+
+        # allow exit without flushing queues (risk of hanging)
+        self.queue.cancel_join_thread()
+        self.wd_queue.cancel_join_thread()
 
         # create and start watchdog
         wd = WatchDog(self.wd_queue)
@@ -56,6 +61,7 @@ class Collector(tweepy.StreamListener):
             self.printer.log("Connected to twitter API.")
             
             # start collection
+            self.last_time = datetime.now()
             stream.filter(**conf.api_filter)
         except KeyboardInterrupt:
             pass
@@ -77,7 +83,8 @@ class Collector(tweepy.StreamListener):
             # it seems workers are no longer working
             return False    # stop
         self.wd_notify()
-        self.queue.put((datetime.now(), raw_data))
+        self.last_time = datetime.now()
+        self.queue.put((self.last_time, raw_data))
 
     def on_error(self, status_code):
         self.wd_notify()
@@ -85,7 +92,11 @@ class Collector(tweepy.StreamListener):
         return True  # keep stream alive
 
     def on_timeout(self):
-        self.wd_suspend()
+        silence_duration = (datetime.now() - self.last_time).total_seconds()
+        if silence_duration < MAX_SILENCE:
+            self.wd_delay()
+        else:
+            self.printer.log('long period of silence! (let the watchdog kill us)')
         self.printer.log('Snoozing Zzzzzz')
 
 class DBWorker(multiprocessing.Process, tweepy.StreamListener):

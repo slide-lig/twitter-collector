@@ -11,7 +11,10 @@ class WatchDog(multiprocessing.Process):
         self.queue = queue
         self.monitoring = []
         self.phase = 0
+    def deadline(self):
+        return datetime.now() + timedelta(seconds = WATCHDOG_TIMEOUT)
     def run(self):
+        print 'watchdog pid', self.pid
         while self.phase < 2:
             timeout = None
             if self.phase == 1:
@@ -22,7 +25,7 @@ class WatchDog(multiprocessing.Process):
             except QueueEmpty:
                 failing_pid = heapq.heappop(self.monitoring)[1]
                 try:
-                    os.kill(failing_pid, signal.SIGKILL)
+                    os.kill(failing_pid, signal.SIGINT)
                     print 'watchdog: killed pid %d' % failing_pid
                 except:
                     pass
@@ -30,6 +33,12 @@ class WatchDog(multiprocessing.Process):
                     self.phase = 2 # stop
                 continue
             except KeyboardInterrupt:
+                continue
+            if req_pid == 0:
+                # reset all timers
+                self.monitoring = zip(
+                        (self.deadline(),) * len(self.monitoring),
+                        zip(*self.monitoring)[1])
                 continue
             # if we already know this process, remove its previous timeout
             found = None
@@ -42,7 +51,7 @@ class WatchDog(multiprocessing.Process):
             if signed_req_pid > 0:
                 # insert the new timeout
                 heapq.heappush(self.monitoring, (
-                    datetime.now() + timedelta(seconds = WATCHDOG_TIMEOUT),
+                    self.deadline(),
                     req_pid
                 ))
                 self.phase = 1
