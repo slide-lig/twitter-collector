@@ -101,6 +101,7 @@ CREATE TABLE tweet_hashtag(
     hashtag_id integer REFERENCES hashtags(hashtag_id)
 );
 CREATE INDEX ON tweet_hashtag(hashtag_id);
+CREATE INDEX ON tweet_hashtag(tweet_id);
 
 --
 -- Meta-programming part.
