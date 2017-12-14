@@ -11,7 +11,8 @@
 	"locations": [ -73, -22.9, 10,  4.6,
                        23,  38.1, 111, 42.3]
     },
-    "num_workers":          20,
+    "num_workers":          5,
+    "max_silence":          60,
     "collector_id":         1
 }
 

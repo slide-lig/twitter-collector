@@ -1,13 +1,13 @@
 
 # Notes for installing on a debian system.
 
+# server side
+# -----------
+
 # of course you need to have posgresql installed first.
-# for the client side we need a recent version of psycopg2 and tweepy
 sudo apt-get install postgresql python-dev libpq-dev \
         postgresql-server-dev-all libxml2-dev libgdal-dev libproj-dev \
         python-pip libffi-dev libssl-dev libjson-c-dev
-sudo pip install 'pip>1.5' --upgrade
-sudo pip install psycopg2 tweepy==2.3.0 requests[security]
 
 # install postgis extension
 wget http://download.osgeo.org/postgis/source/postgis-2.1.7.tar.gz
@@ -64,9 +64,23 @@ twitterdb=> select * from collector;
 twitterdb=> 
 Save the collector_id for the conf.json file (see below).
 
+# client side
+# -----------
+
+# for the client side we need:
+sudo apt-get install screen postgresql-client python-psycopg2 \
+                     python-tweepy python-psycogreen python-gevent
+
 # collector configuration
 cd [...]/twitter-collector
 cp conf.sample.json conf.json
 vi conf.json    # update appropriately
 
+# run!
+./collector.py
 
+# if everything is fine, you can call loop-collect.sh in a
+# cron entry. This will ensure the script restarts in case
+# of problems, including when the host machine restarts,
+# and it will run it in a 'screen' session, allowing to view
+# its output traces easily (screen -r collector).
