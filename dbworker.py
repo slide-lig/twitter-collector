@@ -6,6 +6,7 @@ from tools import Worker, Printer
 LONGITUDE = 0
 LATITUDE = 1
 DB_RECONNECT_DELAY = 20
+MAX_INSERT_FAILURES = 2
 
 SQL_QUERY = 'SELECT registerTweetAndMetadata(' + \
     '%(tweet_id)s, ' + \
@@ -132,23 +133,36 @@ class DBWorker(tweepy.StreamListener, Worker):
                                place_type = place_type,
                                place_name = place_name,
                                place_bbox = place_bbox,
-                             collector_id = self.conf.collector_id)
+                             collector_id = self.conf.collector_id,
+                          insert_failures = 0)
         self.store_tweet_in_db(**info)
     def store_tweet_in_db(self, **info):
+        # if we are not connected to db and reconnection delay is not reached yet,
+        # just pass data to db_fail_queue
         if not self.connected() and \
                 time.time() - self.last_connect_attempt < DB_RECONNECT_DELAY:
             e = Exception('RECONNECT_DELAY not reached yet')
             self.db_fail_queue.put((MESSAGE.FAILURE_DATA, e, info))
-        else:
+            return
+        # ensure we are connected to db
+        if not self.connected():
             try:
-                if not self.connected():
-                    self.connect()
-                self.cursor.execute(SQL_QUERY, info)
-                self.conn.commit()
+                self.connect()
             except BaseException as e:
                 self.db_fail_queue.put((MESSAGE.FAILURE_DATA, e, info))
-                if self.connected():
-                    self.disconnect()
+                return
+        # insert in db
+        try:
+            self.cursor.execute(SQL_QUERY, info)
+            self.conn.commit()
+        except BaseException as e:
+            info['insert_failures'] += 1
+            if info['insert_failures'] == MAX_INSERT_FAILURES:
+                msg = 'Warning: giving up with a tweet we cannot insert in db: %s' % str(e)
+                self.printer.log(msg)
+            else:
+                self.db_fail_queue.put((MESSAGE.FAILURE_DATA, e, info))
+                self.disconnect()   # db connection might be broken
     def on_limit(self, track):
         self.printer.log('Limitation notice: skipped %s tweets' % str(track))
         return
