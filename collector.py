@@ -3,7 +3,7 @@ import gevent.monkey
 gevent.monkey.patch_all()
 import psycogreen.gevent
 psycogreen.gevent.patch_psycopg()
-import gevent.queue, tweepy, gevent, sys, atexit
+import gevent.queue, tweepy, gevent, sys, atexit, traceback
 from datetime import datetime
 from tools import Printer, Conf
 from messages import MESSAGE
@@ -47,7 +47,7 @@ class Collector(tweepy.StreamListener):
         except KeyboardInterrupt:
             pass
         except Exception, e:
-            self.printer.log(e)
+            traceback.print_exc()
         sys.exit()  # this will call self.atexit() below
     def atexit(self):
         # stop workers
