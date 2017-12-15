@@ -31,9 +31,6 @@ class Collector(tweepy.StreamListener):
         try:
             # call additional prepare() functions
             self.db_fail_worker.prepare()
-            # connect to DB first (no need to connect to twitter if this fails)
-            self.printer.log('opening database connections.')
-            [ w.connect() for w in self.db_workers ]
             # start workers
             self.db_fail_worker.start()
             self.db_recovery_worker.start()
