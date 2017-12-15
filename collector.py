@@ -1,6 +1,7 @@
 #!/usr/bin/env python
-import gevent.monkey, psycogreen.gevent
+import gevent.monkey
 gevent.monkey.patch_all()
+import psycogreen.gevent
 psycogreen.gevent.patch_psycopg()
 import gevent.queue, tweepy, gevent, sys, atexit
 from datetime import datetime
