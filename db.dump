@@ -53,9 +53,10 @@ CREATE TABLE place(
     place_id bigint primary key,
     place_type text,
     place_name text,
-    place_bbox geometry
+    place_bbox geometry,
+    place_bbox_valid geometry
 );
-CREATE INDEX ON place USING gist (place_bbox);
+CREATE INDEX ON place USING gist (place_bbox_valid);
 
 --
 -- Name: tweet; Type: TABLE; Schema: public; Owner: twitter; Tablespace: 
@@ -204,7 +205,8 @@ SELECT declare_get_or_insert_function(
         'getOrInsertPlace',
         $PARAMS$
         in_place_id BIGINT, in_place_type TEXT,
-        in_place_name TEXT, in_place_bbox TEXT
+        in_place_name TEXT, in_place_bbox TEXT,
+        in_place_bbox_valid TEXT
         $PARAMS$,
         'place',
         'place_id = in_place_id',
@@ -312,7 +314,7 @@ BEGIN
     -- record the place data if seen for the 1st time
     IF in_place_id IS NOT NULL THEN
         PERFORM getOrInsertPlace(in_place_id, in_place_type,
-                                 in_place_name, in_place_bbox);
+                                 in_place_name, in_place_bbox, NULL);
     END IF;
 
     -- record the tweet itself and associated metadata
